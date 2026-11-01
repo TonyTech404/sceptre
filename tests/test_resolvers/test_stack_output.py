@@ -217,6 +217,54 @@ class TestStackOutputExternalResolver(object):
         )
         assert stack.dependencies == []
 
+    def test_resolve_uses_region_of_current_stack_when_name_is_shared(
+        self, monkeypatch
+    ):
+        # A Stack in another region with the same CloudFormation stack name as the
+        # externally referenced one must not hijack the current Stack's region.
+        for cache in (
+            "_boto_sessions",
+            "_boto_session_expirations",
+            "_clients",
+            "_stack_keys",
+        ):
+            monkeypatch.setattr(ConnectionManager, cache, {})
+        session_class = MagicMock()
+        session_class.return_value.client.return_value.describe_stacks.return_value = {
+            "Stacks": [{"Outputs": [{"OutputKey": "Arn", "OutputValue": "arn"}]}]
+        }
+
+        def create_connection_manager(region, stack_name):
+            return ConnectionManager(
+                region=region,
+                stack_name=stack_name,
+                session_class=session_class,
+                get_envs_func=lambda: {
+                    "AWS_ACCESS_KEY_ID": "key_id",
+                    "AWS_SECRET_ACCESS_KEY": "access_key",
+                },
+            )
+
+        current_connection_manager = create_connection_manager(
+            "ca-central-1", "mytest-sns-sub"
+        )
+        create_connection_manager("us-west-2", "mytest-sns-topic")
+
+        stack = MagicMock(spec=Stack)
+        stack.name = "prod/ca-central-1/sns-sub"
+        stack.dependencies = []
+        stack.connection_manager = current_connection_manager
+
+        resolver = StackOutputExternal("mytest-sns-topic::Arn", stack)
+
+        assert resolver.resolve() == "arn"
+        regions = {
+            call.kwargs["region_name"]
+            for call in session_class.call_args_list
+            if "region_name" in call.kwargs
+        }
+        assert regions == {"ca-central-1"}
+
 
 class MockStackOutputBase(StackOutputBase):
     """

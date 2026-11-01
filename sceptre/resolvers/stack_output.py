@@ -76,7 +76,6 @@ class StackOutputBase(Resolver):
                 kwargs={"StackName": stack_name},
                 profile=profile,
                 region=region,
-                stack_name=stack_name,
                 sceptre_role=sceptre_role,
             )
         except ClientError as e:
